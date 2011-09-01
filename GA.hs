@@ -11,7 +11,7 @@ module GA (Entity(..),
            ShowEntity(..), 
            evolve) where
 
-import Data.List (intersperse, sortBy, nub)
+import Data.List (intersperse, sortBy, nub, splitAt)
 import Data.Maybe (fromJust, isJust)
 import Data.Ord (comparing)
 import Debug.Trace (trace)
@@ -35,12 +35,6 @@ currify :: [a] -> [(a,a)]
 currify (x:y:xs) = (x,y):currify xs
 currify [] = []
 currify [_] = error "(currify) ERROR: only one element left?!?"
-
--- |Take and drop elements of a list in a single pass.
-takeAndDrop :: Int -> [a] -> ([a],[a])
-takeAndDrop n xs
-        | n > 0     = let (hs,ts) = takeAndDrop (n-1) (tail xs) in (head xs:hs, ts)
-        | otherwise = ([],xs)
 
 
 -- |Configuration for genetic algorithm.
@@ -106,7 +100,7 @@ showScoredEntities es = ("["++) . (++"]") . concat . intersperse "," $ map showS
 initPop :: (Entity a b c) => c -> Int -> [Int] -> ([Int],[a])
 initPop src n seeds = (seeds'', entities)
   where
-    (seeds',seeds'')  = takeAndDrop n seeds
+    (seeds',seeds'')  = splitAt n seeds
     entities = map (genRandom src) seeds'
 
 -- |Score an entity (if it hasn't been already).
@@ -148,10 +142,10 @@ evolutionStep src d (cn,mn,an) (crossPar,mutPar) (pop,archive) (gi,seed) = dbg (
     -- split seeds for crossover selection/seeds, mutation selection/seeds
     seeds = randoms (mkStdGen seed) :: [Int]
     -- generate twice as many crossover/mutation entities as needed, because crossover/mutation can fail
-    (crossSelSeeds,seeds')   = takeAndDrop (2*2*cn) seeds
-    (crossSeeds   ,seeds'')  = takeAndDrop (2*cn) seeds'
-    (mutSelSeeds  ,seeds''') = takeAndDrop (2*mn) seeds''
-    (mutSeeds     ,_)        = takeAndDrop (2*mn) seeds'''
+    (crossSelSeeds,seeds')   = splitAt (2*2*cn) seeds
+    (crossSeeds   ,seeds'')  = splitAt (2*cn) seeds'
+    (mutSelSeeds  ,seeds''') = splitAt (2*mn) seeds''
+    (mutSeeds     ,_)        = splitAt (2*mn) seeds'''
     -- crossover entities
     crossSel = currify $ map (tournamentSelection combo) crossSelSeeds
     crossEnts = take cn $ map fromJust $ filter isJust $ zipWith ($) (map (uncurry . (crossover src crossPar)) crossSeeds) crossSel
