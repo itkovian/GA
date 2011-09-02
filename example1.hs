@@ -95,6 +95,7 @@ main = do
                     crossoverPar -- parameter for crossover operator (not used here)
                     mutationPar -- parameter for mutation operator (ratio of replaced letters)
                     checkpointing -- whether or not to use checkpointing
+                    False
 
             g = mkStdGen 0 -- random generator
 
