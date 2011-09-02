@@ -16,7 +16,7 @@ module GA
 
 import qualified Control.Monad.Writer as W
 import           Data.List (intersperse, sortBy, nub, splitAt)
-import           Data.Maybe (fromJust, isJust)
+import           Data.Maybe (catMaybes, fromJust, isJust)
 import           Data.Monoid
 import           Data.Ord (comparing)
 import qualified Data.Text as T
@@ -62,7 +62,7 @@ data GAConfig = GAConfig
               , withCheckpointing :: Bool
                 -- |enable/disable debugging
               , debug :: Bool
-                }
+              }
 
 -- |Type class for entities that represent a candidate solution.
 --
@@ -154,21 +154,23 @@ evolutionStep src d (cn,mn,an) (crossPar,mutPar) generation (gi,seed) =
     combo = scoredPop ++ archive
     -- split seeds for crossover selection/seeds, mutation selection/seeds
     seeds = randoms (mkStdGen seed) :: [Int]
+
     -- generate twice as many crossover/mutation entities as needed, because crossover/mutation can fail
     (crossSelSeeds,seeds')   = splitAt (2*2*cn) seeds
     (crossSeeds   ,seeds'')  = splitAt (2*cn) seeds'
     (mutSelSeeds  ,seeds''') = splitAt (2*mn) seeds''
     (mutSeeds     ,_)        = splitAt (2*mn) seeds'''
+
     -- crossover entities
     crossSel = currify $ map (tournamentSelection combo) crossSelSeeds
-    crossEnts = take cn $ map fromJust $ filter isJust $ zipWith ($) (map (uncurry . (crossover src crossPar)) crossSeeds) crossSel
+    crossEnts = take cn $ catMaybes $ zipWith ($) (map (uncurry . (crossover src crossPar)) crossSeeds) crossSel
     -- mutation entities
     mutSel = map (tournamentSelection combo) mutSelSeeds
-    mutEnts = take cn $ map fromJust $ filter isJust $ zipWith ($) (map (mutation src mutPar) mutSeeds) mutSel
+    mutEnts = take cn $ catMaybes $ zipWith ($) (map (mutation src mutPar) mutSeeds) mutSel
     -- new population: crossovered + mutated entities
     pop' = zip (repeat Nothing) $ crossEnts ++ mutEnts
     -- new archive: best entities so far
-    archive' = take an $ nub $ sortBy (comparing fst) $ filter (isJust . fst) combo
+    archive' = take an $ nub $ sortBy (comparing fst) $ filter (isJust . fst) combo -- FIXME: These should be scored, so the filter is superfluous
 
 -- |Generate file name for checkpoint.
 chkptFileName :: GAConfig -> (Int,Int) -> FilePath
