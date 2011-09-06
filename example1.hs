@@ -9,8 +9,11 @@
 {-# LANGUAGE MultiParamTypeClasses #-}
 {-# LANGUAGE TypeSynonymInstances #-}
 
+import           Control.Monad.IO.Class (liftIO)
+import qualified Control.Monad.ST as ST
 import           Data.Char (chr,ord)
 import           Data.List (foldl')
+import qualified Data.STRef as STRef
 import           System (getArgs,getProgName)
 import           System.Random (mkStdGen, random, randoms)
 
@@ -24,18 +27,20 @@ sum' = foldl' (+) 0
 -- GA TYPE CLASS IMPLEMENTATION
 --
 
--- pool of characters to pick from
-charsPool = map chr [32..126]
+-- pool of data for the generation of entities
+pool = (map chr [32..126])
 
-instance Entity String String where
+
+instance Entity String where
  
   -- generate a random entity, i.e. a random string
   -- assumption: max. 100 chars, only 'printable' ASCII (first 128)
-  genRandom seed = take n $ map ((!!) charsPool) is
+  genRandom seed = take n $ map ((!!) p) is
     where
+        p = pool
         g = mkStdGen seed
         n = (fst $ random g) `mod` 101
-        k = length charsPool
+        k = length $ p
         is = map (flip mod k) $ randoms g
 
   -- crossover operator: mix (and trim to shortest entity)
@@ -49,6 +54,7 @@ instance Entity String String where
   -- mutation operator: use next or previous letter randomly and add random characters (max. 9)
   mutation p seed e = Just $ (zipWith replace tweaks e) ++ addChars
     where
+      pool' = pool 
       g = mkStdGen seed
       k = round (1 / p) :: Int
       tweaks = randoms g :: [Int]
@@ -57,14 +63,15 @@ instance Entity String String where
                                then if x > (minBound :: Char) then pred x else succ x
                                else if x < (maxBound :: Char) then succ x else pred x
                        else x
-      is = map (flip mod $ length charsPool) $ randoms g
-      addChars = take (seed `mod` 10) $ map ((!!) charsPool) is
+      is = map (flip mod $ length pool') $ randoms g
+      addChars = take (seed `mod` 10) $ map ((!!) pool') is
 
   -- score: distance between current string and target
   -- sum of 'distances' between letters, large penalty for additional/short letters
   -- NOTE: lower is better
-  score e x = fromIntegral $ d + 100*l
+  score x = fromIntegral $ d + 100*l
     where
+      e = "Hello World!"
       e' = map ord e
       x' = map ord x
       d = sum' $ map abs $ zipWith (-) e' x'
@@ -105,6 +112,6 @@ main = do
 
         -- Do the evolution!
         -- Note: if either of the last two arguments is unused, just use () as a value
-        e <- evolve g cfg "Hello World!" :: IO String
+        e <- evolve g cfg :: IO String
         
         putStrLn $ "best entity: " ++ (show e)

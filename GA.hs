@@ -7,6 +7,7 @@
 -- Aug. 2011, by Kenneth Hoste
 --
 -- version: 0.1
+
 module GA 
     ( Entity(..)
     , GAConfig(..)
@@ -64,19 +65,28 @@ data GAConfig = GAConfig
               , debug :: Bool
               }
 
+-- | A simpe type synonym for the seed.
+type Seed = Int
+
+----------------------------------------------------------------------------------
 -- |Type class for entities that represent a candidate solution.
 --
--- Three parameters:
+-- Single parameters:
 --
--- * data structure representing an entity (a)
+-- * Data structure representing an entity (a). At the least a should be an
+--   instance of Show, Read, Eq and ShowEntity.
 --
--- * data used to score an entity, e.g. a list of numbers (b)
+-- NOTE: To generate random entities, we need a seed. This is
+-- taken care of by the GA library, which provides it for each 
+-- call to genRandom. The user of GA is free to use whatever
+-- data source that he deems fit to fill up these entities.
 --
--- * some kind of pool used to generate random entities, e.g. a Hoogle database (c)
+-- NOTE: Similarly, the score function can obviously use any data source
+-- from the user's implementation to assign a score to an entity.
 --
-class (Eq a, Read a, Show a, ShowEntity a) => Entity a b | a -> b where
+class (Eq a, Read a, Show a, ShowEntity a) => Entity a where
   -- |Generate a random entity.
-  genRandom :: Int -> a
+  genRandom :: Seed -> a
 
   -- |Crossover operator: combine two entities into a new entity.
   crossover :: Float -> Int -> a -> a -> Maybe a
@@ -85,7 +95,7 @@ class (Eq a, Read a, Show a, ShowEntity a) => Entity a b | a -> b where
   mutation :: Float -> Int -> a -> Maybe a
   
   -- |Score an entity (lower is better).
-  score :: a -> b -> Double
+  score :: a -> Double
 
 
 -- |A possibly scored entity.
@@ -108,16 +118,16 @@ showScoredEntities :: ShowEntity a => [ScoredEntity a] -> String
 showScoredEntities es = ("["++) . (++"]") . concat . intersperse "," $ map showScoredEntity es
 
 -- |Initialize: generate initial population.
-initPop :: (Entity a b) => Int -> [Int] -> ([Int],[a])
+initPop :: (Entity a) => Int -> [Int] -> ([Int],[a])
 initPop n seeds = (seeds'', entities)
   where
     (seeds',seeds'')  = splitAt n seeds
     entities = map (genRandom) seeds'
 
 -- |Score an entity (if it hasn't been already).
-scoreEnt :: (Entity a b) => b -> ScoredEntity a -> ScoredEntity a
-scoreEnt d e@(Just _,_) = e
-scoreEnt d (Nothing,x) = (Just $ score x d, x)
+scoreEnt :: (Entity a) => ScoredEntity a -> ScoredEntity a
+scoreEnt e@(Just _, _) = e
+scoreEnt (Nothing,x) = (Just $ score x, x)
 
 -- |Binary tournament selection operator.
 tournamentSelection :: [ScoredEntity a] -> Int -> a
@@ -137,8 +147,8 @@ tournamentSelection xs seed = if s1 < s2 then x1 else x2
 -- * sort by fitness
 --
 -- * create new population using crossover/mutation
-evolutionStep :: (Entity a b) => b -> (Int,Int,Int) -> (Float,Float) -> ScoredGen a -> (Int,Int) -> ScoredGen a
-evolutionStep d (cn,mn,an) (crossPar,mutPar) generation (gi,seed) = 
+evolutionStep :: (Entity a) => (Int,Int,Int) -> (Float,Float) -> ScoredGen a -> (Int,Int) -> ScoredGen a
+evolutionStep (cn,mn,an) (crossPar,mutPar) generation (gi,seed) = 
       do W.tell $ T.unlines [ "  generation " `mappend` (T.pack $ show gi) `mappend` ":" , "" , ""
                             , "  scored population: " `mappend` (T.pack $ showScoredEntities scoredPop) , "", ""
                             , "  archive: " `mappend` (T.pack $ showScoredEntities archive'), "", ""
@@ -149,7 +159,7 @@ evolutionStep d (cn,mn,an) (crossPar,mutPar) generation (gi,seed) =
   where
     (pop, archive) = fst $ W.runWriter generation
     -- score population
-    scoredPop = map (scoreEnt d) pop
+    scoredPop = map (scoreEnt) pop
     -- combine with archive for selection
     combo = scoredPop ++ archive
     -- split seeds for crossover selection/seeds, mutation selection/seeds
@@ -185,7 +195,7 @@ chkptFileName cfg (gi,seed) = dbg fn fn
     fn = "checkpoints/GA-" ++ cfgTxt ++ "-gen" ++ (show gi) ++ "-seed-" ++ (show seed) ++ ".chk"
 
 -- |Try to restore from checkpoint: first checkpoint for which a checkpoint file is found is restored.
-restoreFromCheckpoint :: Entity a b => GAConfig -> [(Int,Int)] -> IO (Maybe (Int,ScoredGen a))
+restoreFromCheckpoint :: Entity a => GAConfig -> [(Int,Int)] -> IO (Maybe (Int,ScoredGen a))
 restoreFromCheckpoint cfg ((gi,seed):genSeeds) = do
                                                   chkptFound <- doesFileExist fn
                                                   if chkptFound 
@@ -198,7 +208,7 @@ restoreFromCheckpoint cfg ((gi,seed):genSeeds) = do
 restoreFromCheckpoint cfg [] = return Nothing
 
 -- |Checkpoint a single generation.
-checkpointGen :: (Entity a b) => GAConfig -> Int -> Int -> ScoredGen a -> IO()
+checkpointGen :: (Entity a) => GAConfig -> Int -> Int -> ScoredGen a -> IO()
 checkpointGen cfg index seed generation = do
                                            let (pop, archive) = fst $ W.runWriter generation
                                                txt = show $ (pop,archive)
@@ -211,11 +221,11 @@ checkpointGen cfg index seed generation = do
 
 -- |Evolution: evaluate generation, (maybe) checkpoint, continue.
 -- FIXME: evolution is not an exported function, so the need to pass along the transformation seems superfluous
-evolution :: (Entity a b) => GAConfig                                  -- ^ configuration for the GA
-                            -> ScoredGen a                               -- ^ current generation
-                            -> (ScoredGen a -> (Int,Int) -> ScoredGen a) -- ^ transformation function, i.e., the evolutionary step
-                            -> [(Int,Int)]                               -- ^ FIXME: clueless
-                            -> IO (ScoredGen a)                          -- ^ Resulting generation
+evolution :: (Entity a) => GAConfig                                  -- ^ configuration for the GA
+                        -> ScoredGen a                               -- ^ current generation
+                        -> (ScoredGen a -> (Int,Int) -> ScoredGen a) -- ^ transformation function, i.e., the evolutionary step
+                        -> [(Int,Int)]                               -- ^ FIXME: clueless
+                        -> IO (ScoredGen a)                          -- ^ Resulting generation
 evolution cfg generation step ((gi,seed):gss) = do
                                              let --(pop, archive) = fst $ W.runWriter generation
                                                  newPa = step generation (gi,seed)
@@ -241,8 +251,8 @@ evolution cfg generation _              []    = do
 
 
 -- |Do the evolution! In this function, checkpointing is enabled
-evolve:: (Entity a b) => StdGen -> GAConfig -> b -> IO a
-evolve g cfg dataset = do
+evolve:: (Entity a) => StdGen -> GAConfig -> IO a
+evolve g cfg = do
                 -- generate list of random integers
                 let rs = randoms g :: [Int]
 
@@ -266,7 +276,7 @@ evolve g cfg dataset = do
                     checkpointing = withCheckpointing cfg
                     -- do the evolution
                 restored <- if checkpointing
-                               then restoreFromCheckpoint cfg (reverse genSeeds) :: (Entity a b) => IO (Maybe (Int,ScoredGen a))
+                               then restoreFromCheckpoint cfg (reverse genSeeds) :: (Entity a) => IO (Maybe (Int,ScoredGen a))
                                else return Nothing
                 let (gi',generation') = case restored of
                                             -- restored pop/archive from checkpoint
@@ -274,7 +284,7 @@ evolve g cfg dataset = do
                                                                                                                return generation
                                                                      in (gi, g')
                                             _                     -> (-1, return $ (zip (repeat Nothing) pop, []))
-                resGeneration <- evolution cfg generation' (evolutionStep dataset (cCnt,mCnt,aSize) (crossPar,mutPar)) (filter ((>gi') . fst) genSeeds)
+                resGeneration <- evolution cfg generation' (evolutionStep (cCnt,mCnt,aSize) (crossPar,mutPar)) (filter ((>gi') . fst) genSeeds)
                 
                 let (_, resArchive) = fst $ W.runWriter resGeneration
                 if null resArchive
