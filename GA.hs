@@ -102,7 +102,7 @@ class (Eq a, Read a, Show a, ShowEntity a) => Entity a where
 type ScoredEntity a = (Maybe Double, a)
 
 -- |Scored generation (population and archive).
-type ScoredGen a = W.Writer T.Text ([ScoredEntity a],[ScoredEntity a])
+type ScoredGen a = W.Writer T.Text ([a],[ScoredEntity a])
 
 -- |Type class for pretty printing an entity instead of just using the default show implementation.
 class ShowEntity a where
@@ -178,7 +178,7 @@ evolutionStep (cn,mn,an) (crossPar,mutPar) generation (gi,seed) =
     mutSel = map (tournamentSelection combo) mutSelSeeds
     mutEnts = take cn $ catMaybes $ zipWith ($) (map (mutation mutPar) mutSeeds) mutSel
     -- new population: crossovered + mutated entities
-    pop' = zip (repeat Nothing) $ crossEnts ++ mutEnts
+    pop' = crossEnts ++ mutEnts
     -- new archive: best entities so far
     archive' = take an $ nub $ sortBy (comparing fst) $ filter (isJust . fst) combo -- FIXME: These should be scored, so the filter is superfluous
 
@@ -324,7 +324,7 @@ evolve g cfg = do
                                             Just (gi, generation) -> let g' = generation >>= \generation -> do W.tell $ T.unlines ["restored from checkpoint", "", ""]
                                                                                                                return generation
                                                                      in (gi, g')
-                                            _                     -> (-1, return $ (zip (repeat Nothing) pop, []))
+                                            _                     -> (-1, return $ (pop, []))
                 resGeneration <- evolution cfg generation' (evolutionStep (cCnt,mCnt,aSize) (crossPar,mutPar)) (filter ((>gi') . fst) genSeeds)
                 
                 let (_, resArchive) = fst $ W.runWriter resGeneration
