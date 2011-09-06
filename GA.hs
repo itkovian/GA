@@ -92,7 +92,7 @@ class (Eq a, Read a, Show a, ShowEntity a) => Entity a b c | a -> b, a -> c wher
 type ScoredEntity a = (Maybe Double, a)
 
 -- |Scored generation (population and archive).
-type ScoredGen a = W.Writer T.Text ([ScoredEntity a],[ScoredEntity a])
+type ScoredGen a = W.Writer T.Text ([a],[ScoredEntity a])
 
 -- |Type class for pretty printing an entity instead of just using the default show implementation.
 class ShowEntity a where
@@ -115,9 +115,8 @@ initPop src n seeds = (seeds'', entities)
     entities = map (genRandom src) seeds'
 
 -- |Score an entity (if it hasn't been already).
-scoreEnt :: (Entity a b c) => b -> ScoredEntity a -> ScoredEntity a
-scoreEnt d e@(Just _,_) = e
-scoreEnt d (Nothing,x) = (Just $ score x d, x)
+scoreEnt :: (Entity a b c) => b -> a -> ScoredEntity a
+scoreEnt d x = (Just $ score x d, x)
 
 -- |Binary tournament selection operator.
 tournamentSelection :: [ScoredEntity a] -> Int -> a
@@ -168,7 +167,7 @@ evolutionStep src d (cn,mn,an) (crossPar,mutPar) generation (gi,seed) =
     mutSel = map (tournamentSelection combo) mutSelSeeds
     mutEnts = take cn $ catMaybes $ zipWith ($) (map (mutation src mutPar) mutSeeds) mutSel
     -- new population: crossovered + mutated entities
-    pop' = zip (repeat Nothing) $ crossEnts ++ mutEnts
+    pop' = crossEnts ++ mutEnts
     -- new archive: best entities so far
     archive' = take an $ nub $ sortBy (comparing fst) $ filter (isJust . fst) combo -- FIXME: These should be scored, so the filter is superfluous
 
@@ -273,8 +272,8 @@ evolve g cfg src dataset = do
                                             Just (gi, generation) -> let g' = generation >>= \generation -> do W.tell $ T.unlines ["restored from checkpoint", "", ""]
                                                                                                                return generation
                                                                      in (gi, g')
-                                            _                     -> (-1, return $ (zip (repeat Nothing) pop, []))
-                resGeneration <- evolution cfg generation' (evolutionStep src dataset (cCnt,mCnt,aSize) (crossPar,mutPar)) (filter ((>gi') . fst) genSeeds)
+                                            _                     -> (-1, return $ (pop, []))
+                resGeneration <- evolution cfg generation' (evolutionStep src dataset (cCnt,mCnt,aSize) (crossPar,mutPar)) (filter ((>gi') . fst) genSeeds) 
                 
                 let (_, resArchive) = fst $ W.runWriter resGeneration
                 if null resArchive
