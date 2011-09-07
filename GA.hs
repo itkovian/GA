@@ -102,7 +102,7 @@ class Mutator a where
 -- NOTE: Similarly, the score function can obviously use any data source
 -- from the user's implementation to assign a score to an entity.
 --
-class (Monad m, Mutator a) => Entity m a where
+class (Monad m, Mutator a, Eq a, Show a) => Entity m a where
   -- |Generate a random entity.
   genRandom :: Seed -> m a
   
@@ -155,6 +155,7 @@ tournamentSelection xs seed =
          then x1
          else x2
 
+-- |Obtain the seeds for driving the randomness in the evolution
 evolutionSeeds :: Int -> Int -> Int -> ([Int], [Int], [Int], [Int])
 evolutionSeeds seed cn mn = 
     let seeds = randoms (mkStdGen seed) :: [Int]
@@ -165,28 +166,28 @@ evolutionSeeds seed cn mn =
         (mutationSeeds     ,_)              = splitAt (2*mn) seeds'''
     in (crossoverSelectionSeeds, crossoverSeeds, mutationSelectionSeeds, mutationSeeds)
 
-
--- performCrossover :: (Monad m, Entity m a) => Float -> Int -> [Int] -> [Int] -> [ScoredEntity a] -> [a]
+-- |Combine a set of entities into a set of new ones using the crossover operator.
+--performCrossover :: (Monad m, Entity m a) => Float -> Int -> [Int] -> [Int] -> [ScoredEntity a] -> [a]
 performCrossover p count selSeeds seeds es =
     let tuples = currify $ map (tournamentSelection es) selSeeds
     in take count . catMaybes . zipWith ($) (map (uncurry . (crossover p)) seeds) $ tuples
 
-crossEnts' count p seeds = take count . catMaybes . zipWith ($) (map (uncurry . (crossover p)) seeds) 
-
- 
-performMutation :: (Monad m, Entity m a) => Float -> Int -> [Int] -> [Int] -> [ScoredEntity a] -> [a]
+-- |Derive a new set of entities using the mutation operator.
+--performMutation :: (Monad m, Entity m a) => Float -> Int -> [Int] -> [Int] -> [ScoredEntity a] -> [a]
 performMutation p count selSeeds seeds es = 
     take count $ catMaybes $ zipWith ($) (map (mutation p) seeds) $ map (tournamentSelection es) selSeeds 
 
 -- |Function to perform a single evolution step:
 --
--- * score all entities
+-- * score all entities in the population
 --
--- * combine with best entities so far
+-- * combine with best entities so far (the archive)
 --
 -- * sort by fitness
 --
 -- * create new population using crossover/mutation
+--
+-- * retain the best scoring entities in the archive
 evolutionStep :: (Monad m, Entity m a) => (Int,Int,Int) -> (Float,Float) -> Generation m a -> (Int,Int) -> Generation m a
 evolutionStep (cn,mn,an) (crossPar,mutPar) generation (gi,seed) = do
     (pop, archive) <- lift $ liftM fst $ W.runWriterT generation  -- lift because we need to get hold of the inner monad shizzle
@@ -198,20 +199,11 @@ evolutionStep (cn,mn,an) (crossPar,mutPar) generation (gi,seed) = do
     let combo = scoredPop `mappend` archive 
         -- split seeds for crossover selection/seeds, mutation selection/seeds
         (crossoverSelectionSeeds, crossoverSeeds, mutationSelectionSeeds, mutationSeeds) = evolutionSeeds seed cn mn
-
-        -- crossover entities
-        -- combo :: [ScoredEntity a] ?
-        -- tournamentSelection :: ScoredEntity a -> Int -> a
         crossoverEntities = performCrossover crossPar cn crossoverSelectionSeeds crossoverSeeds combo 
-        -- crossoverEntities = crossEnts' cn crossPar crossoverSeeds $ currify $ map (tournamentSelection combo) crossoverSelectionSeeds
+        mutatedEntities = performMutation mutPar mn mutationSelectionSeeds mutationSeeds combo
 
-    generation
-{-
-        -- mutation entities
-        mutSel = map (tournamentSelection combo) mutSelSeeds
-        mutEnts = take cn $ catMaybes $ zipWith ($) (map (mutation mutPar) mutSeeds) mutSel
         -- new population: crossovered + mutated entities
-        pop' = undefined -- crossEnts ++ mutEnts
+        pop' = crossoverEntities `mappend` mutatedEntities 
         -- new archive: best entities so far
         archive' = take an $ nub $ sortBy (comparing fst) $ combo 
   
@@ -222,7 +214,6 @@ evolutionStep (cn,mn,an) (crossPar,mutPar) generation (gi,seed) = do
                             , "  generated " `mappend` (T.pack $ show (length pop')) `mappend` " entities", "", ""
                             , "============================================================================================="]
     return $ (pop',archive')
--}
 
 -- |Generate file name for checkpoint.
 chkptFileName :: GAConfig -> (Int,Int) -> FilePath
@@ -297,17 +288,18 @@ evolution cfg generation _              []    = do
                                                       putStrLn $ "done evolving!"
                                                       return generation
 -}
-{-
+
 evolution :: (Entity m a) => GAConfig                                  -- ^ configuration for the GA
-                        -> Generation m a                               -- ^ current generation
-                        -> (Generation m a -> (Int,Int) -> Generation m a) -- ^ transformation function, i.e., the evolutionary step
-                        -> [(Int,Int)]                               -- ^ FIXME: clueless
-                        -> Generation m a                               -- ^ Resulting generation
+                          -> Generation m a                               -- ^ current generation
+                          -> (Generation m a -> (Int,Int) -> Generation m a) -- ^ transformation function, i.e., the evolutionary step
+                          -> [(Int,Int)]                               -- ^ FIXME: clueless
+                          -> Generation m a                               -- ^ Resulting generation
 evolution cfg generation step ((gi,seed):gss) = do
-    let --(pop, archive) = fst $ W.runWriter generation
-        newPa = step generation (gi,seed)
-        (_, archive') = fst $ W.runWriter newPa
-    (Just fitness, e) <- liftM head archive'
+    nextGeneration <- step generation (gi, seed) 
+
+    let newPa = step generation (gi,seed)
+        (_, archive') = nextGeneration
+        (fitness, e) = head archive'
     W.tell $ "best entity (gen. " 
            `mappend` (T.pack $ show gi) 
            `mappend` "): " 
@@ -329,7 +321,7 @@ evolution _ generation _ []    = do
     W.tell $ "done evolving!"
     generation
 
--}
+
 
 
 -- |Do the evolution! In this function, checkpointing is enabled
