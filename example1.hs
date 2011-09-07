@@ -112,6 +112,6 @@ main = do
 
         -- Do the evolution!
         -- Note: if either of the last two arguments is unused, just use () as a value
-        e <- evolve g cfg :: IO String
+        let e = evolve g cfg :: String
         
         putStrLn $ "best entity: " ++ (show e)
