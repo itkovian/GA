@@ -396,6 +396,7 @@ evolve g cfg = do
         generation' = return $ (pop, [])
      in evolution cfg generation' (evolutionStep (cCnt,mCnt,aSize) (crossPar,mutPar)) (filter ((> -1) . fst) genSeeds)
 
+
 optimal :: (Monad m, Entity m a) => Generation m a -> m a
 optimal resGeneration = do
     ((_, resArchive), _) <- W.runWriterT resGeneration

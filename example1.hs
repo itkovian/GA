@@ -9,6 +9,7 @@
 {-# LANGUAGE MultiParamTypeClasses #-}
 {-# LANGUAGE TypeSynonymInstances #-}
 
+import qualified Control.Monad.Identity as I
 import           Control.Monad.IO.Class (liftIO)
 import qualified Control.Monad.ST as ST
 import           Data.Char (chr,ord)
@@ -17,7 +18,7 @@ import qualified Data.STRef as STRef
 import           System (getArgs,getProgName)
 import           System.Random (mkStdGen, random, randoms)
 
-import           GA (Entity(..), GAConfig(..), ShowEntity(..), evolve)
+import           GA (Mutator(..), Entity(..), GAConfig(..), evolve, optimal)
 
 -- efficient sum
 sum' :: (Num a) => [a] -> a
@@ -30,19 +31,8 @@ sum' = foldl' (+) 0
 -- pool of data for the generation of entities
 pool = (map chr [32..126])
 
-
-instance Entity String where
- 
-  -- generate a random entity, i.e. a random string
-  -- assumption: max. 100 chars, only 'printable' ASCII (first 128)
-  genRandom seed = take n $ map ((!!) p) is
-    where
-        p = pool
-        g = mkStdGen seed
-        n = (fst $ random g) `mod` 101
-        k = length $ p
-        is = map (flip mod k) $ randoms g
-
+instance Mutator String where
+  -- crossover operator
   -- crossover operator: mix (and trim to shortest entity)
   crossover _ seed e1 e2 = Just e
     where
@@ -50,7 +40,6 @@ instance Entity String where
       cps = zipWith (\x y -> [x,y]) e1 e2
       picks = map (flip mod 2) $ randoms g
       e = zipWith (!!) cps picks
-
   -- mutation operator: use next or previous letter randomly and add random characters (max. 9)
   mutation p seed e = Just $ (zipWith replace tweaks e) ++ addChars
     where
@@ -66,19 +55,29 @@ instance Entity String where
       is = map (flip mod $ length pool') $ randoms g
       addChars = take (seed `mod` 10) $ map ((!!) pool') is
 
+
+instance Entity I.Identity String where
+ 
+  -- generate a random entity, i.e. a random string
+  -- assumption: max. 100 chars, only 'printable' ASCII (first 128)
+  genRandom seed = do
+      let p = pool
+          g = mkStdGen seed
+          n = (fst $ random g) `mod` 101
+          k = length $ p
+          is = map (flip mod k) $ randoms g
+      return $ take n $ map ((!!) p) is
+
   -- score: distance between current string and target
   -- sum of 'distances' between letters, large penalty for additional/short letters
   -- NOTE: lower is better
-  score x = fromIntegral $ d + 100*l
-    where
-      e = "Hello World!"
-      e' = map ord e
-      x' = map ord x
-      d = sum' $ map abs $ zipWith (-) e' x'
-      l = abs $ (length x) - (length e)
-
-instance ShowEntity String where 
-  showEntity = show
+  score x = do 
+      let e = "Hello World!"
+          e' = map ord e
+          x' = map ord x
+          d = sum' $ map abs $ zipWith (-) e' x'
+          l = abs $ (length x) - (length e)
+      return $ fromIntegral $ d + 100*l
  
 main = do
         args <- getArgs
@@ -112,6 +111,7 @@ main = do
 
         -- Do the evolution!
         -- Note: if either of the last two arguments is unused, just use () as a value
-        let e = evolve g cfg :: String
+        let finalGen = evolve g cfg 
+            e = optimal finalGen :: I.Identity String
         
-        putStrLn $ "best entity: " ++ (show e)
+        putStrLn $ "best entity: " ++ (show $ I.runIdentity e)
