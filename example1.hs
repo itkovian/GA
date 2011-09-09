@@ -18,7 +18,7 @@ import qualified Data.STRef as STRef
 import           System (getArgs,getProgName)
 import           System.Random (mkStdGen, random, randoms)
 
-import           GA (Mutator(..), Entity(..), GAConfig(..), evolve, optimal)
+import           GA (Mutator(..), Entity(..), GAConfig(..), evolve, best)
 
 -- efficient sum
 sum' :: (Num a) => [a] -> a
@@ -56,7 +56,7 @@ instance Mutator String where
       addChars = take (seed `mod` 10) $ map ((!!) pool') is
 
 
-instance Entity I.Identity String where
+instance Entity I.Identity String Double where
  
   -- generate a random entity, i.e. a random string
   -- assumption: max. 100 chars, only 'printable' ASCII (first 128)
@@ -78,6 +78,9 @@ instance Entity I.Identity String where
           d = sum' $ map abs $ zipWith (-) e' x'
           l = abs $ (length x) - (length e)
       return $ fromIntegral $ d + 100*l
+
+  optimal x s = do
+      return $ s == 0.0
  
 main = do
         args <- getArgs
@@ -112,6 +115,6 @@ main = do
         -- Do the evolution!
         -- Note: if either of the last two arguments is unused, just use () as a value
         let finalGen = evolve g cfg 
-            e = optimal finalGen :: I.Identity String
+            e = best finalGen :: I.Identity String 
         
         putStrLn $ "best entity: " ++ (show $ I.runIdentity e)
