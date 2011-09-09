@@ -8,6 +8,7 @@
 -- |GA, a Haskell library for working with genetic algoritms
 --
 -- Aug. 2011, by Kenneth Hoste
+-- Changes made by Andy Georges, under a BSD license.
 --
 -- version: 0.1
 
@@ -87,6 +88,8 @@ class Mutator a where
   -- | Mutation operator: mutate an entity into a new entity.
   mutation :: Float -> Int -> a -> Maybe a
 
+
+
 ----------------------------------------------------------------------------------
 -- |Type class for entities that represent a candidate solution.
 --
@@ -103,12 +106,15 @@ class Mutator a where
 -- NOTE: Similarly, the score function can obviously use any data source
 -- from the user's implementation to assign a score to an entity.
 --
-class (Monad m, Mutator a, Eq a, Show a) => Entity m a where
+class (Monad m, Mutator a, Eq a, Show a, Ord s, Show s) => Entity m a s | a -> s where
   -- |Generate a random entity.
   genRandom :: Seed -> m a
   
-  -- |Score an entity (lower is better).
-  score :: a -> m Double
+  -- |Score an entity. This score can be a multidimensional thing.
+  score :: a -> m s
+
+  -- |Is the entity optimal?
+  optimal :: a -> m Bool
 
   -- |Crossover operator: combine two entities into a new entity.
   -- crossover :: Float -> Int -> a -> a -> Maybe a
@@ -118,11 +124,11 @@ class (Monad m, Mutator a, Eq a, Show a) => Entity m a where
   
 
 -- |A possibly scored entity.
-type ScoredEntity a = (Double, a)
+type ScoredEntity a s = (s, a)
 
 
 -- |Scored generation (population and archive).
-type Generation m a = W.WriterT T.Text m ([a], [ScoredEntity a])
+type Generation m a s = W.WriterT T.Text m ([a], [ScoredEntity a s])
 
 -- |Type class for pretty printing an entity instead of just using the default show implementation.
 --class (Monad m) => ShowEntity m a where
@@ -138,7 +144,7 @@ type Generation m a = W.WriterT T.Text m ([a], [ScoredEntity a])
 --showScoredEntities es = ("["++) . (++"]") . concat . intersperse "," $ map showScoredEntity es
 
 -- |Initialize: generate initial population.
-initPop :: (Entity m a) => Int -> [Int] -> m ([Int], [a])
+initPop :: (Entity m a s) => Int -> [Int] -> m ([Int], [a])
 initPop n seeds = do
     let (seeds', seeds'') = splitAt n seeds
     entities <- mapM genRandom seeds'
@@ -146,7 +152,7 @@ initPop n seeds = do
 
 
 -- |Binary tournament selection operator.
-tournamentSelection :: [ScoredEntity a] -> Int -> a
+tournamentSelection :: (Ord s) => [ScoredEntity a s] -> Int -> a
 tournamentSelection xs seed = 
   let len = length xs
       g = mkStdGen seed
@@ -168,13 +174,13 @@ evolutionSeeds seed cn mn =
     in (crossoverSelectionSeeds, crossoverSeeds, mutationSelectionSeeds, mutationSeeds)
 
 -- |Combine a set of entities into a set of new ones using the crossover operator.
-performCrossover :: (Mutator a) => Float -> Int -> [Int] -> [Int] -> [ScoredEntity a] -> [a]
+performCrossover :: (Mutator a, Ord s) => Float -> Int -> [Int] -> [Int] -> [ScoredEntity a s] -> [a]
 performCrossover p count selSeeds seeds es =
     let tuples = currify $ map (tournamentSelection es) selSeeds
     in take count . catMaybes . zipWith ($) (map (uncurry . (crossover p)) seeds) $ tuples
 
 -- |Derive a new set of entities using the mutation operator.
-performMutation :: (Mutator a) => Float -> Int -> [Int] -> [Int] -> [ScoredEntity a] -> [a]
+performMutation :: (Mutator a, Ord s) => Float -> Int -> [Int] -> [Int] -> [ScoredEntity a s] -> [a]
 performMutation p count selSeeds seeds es = 
     take count $ catMaybes $ zipWith ($) (map (mutation p) seeds) $ map (tournamentSelection es) selSeeds 
 
@@ -189,7 +195,7 @@ performMutation p count selSeeds seeds es =
 -- * create new population using crossover/mutation
 --
 -- * retain the best scoring entities in the archive
-evolutionStep :: (Monad m, Entity m a) => (Int,Int,Int) -> (Float,Float) -> Generation m a -> (Int,Int) -> Generation m a
+evolutionStep :: (Monad m, Entity m a s) => (Int,Int,Int) -> (Float,Float) -> Generation m a s -> (Int,Int) -> Generation m a s
 evolutionStep (cn,mn,an) (crossPar,mutPar) generation (gi,seed) = do
     (pop, archive) <- lift $ liftM fst $ W.runWriterT generation  -- lift because we need to get hold of the inner monad shizzle
 
@@ -290,11 +296,11 @@ evolution cfg generation _              []    = do
                                                       return generation
 -}
 
-evolution :: (Entity m a) => GAConfig                                  -- ^ configuration for the GA
-                          -> Generation m a                               -- ^ current generation
-                          -> (Generation m a -> (Int,Int) -> Generation m a) -- ^ transformation function, i.e., the evolutionary step
+evolution :: (Entity m a s) => GAConfig                                  -- ^ configuration for the GA
+                          -> Generation m a s                             -- ^ current generation
+                          -> (Generation m a s -> (Int,Int) -> Generation m a s) -- ^ transformation function, i.e., the evolutionary step
                           -> [(Int,Int)]                               -- ^ FIXME: clueless
-                          -> Generation m a                               -- ^ Resulting generation
+                          -> Generation m a s                             -- ^ Resulting generation
 evolution cfg generation step ((gi,seed):gss) = do
     nextGeneration <- step generation (gi, seed) 
 
@@ -309,7 +315,8 @@ evolution cfg generation step ((gi,seed):gss) = do
            `mappend` (T.pack $ show fitness)
            `mappend` "]"
     -- check for perfect entity
-    if fitness == 0.0
+    o <- lift $ optimal e
+    if o
         then do 
             W.tell $ "perfect entity found, finished after "
                    `mappend` (T.pack $ show gi)
@@ -369,7 +376,7 @@ evolve g cfg = do
 -}
 
 -- |Do the evolution! In this function, checkpointing is disabled
-evolve:: (Entity m a) => StdGen -> GAConfig -> Generation m a
+evolve:: (Entity m a s) => StdGen -> GAConfig -> Generation m a s
 evolve g cfg = do
     -- generate list of random integers
     let rs = randoms g :: [Int]
@@ -397,8 +404,8 @@ evolve g cfg = do
      in evolution cfg generation' (evolutionStep (cCnt,mCnt,aSize) (crossPar,mutPar)) (filter ((> -1) . fst) genSeeds)
 
 
-optimal :: (Monad m, Entity m a) => Generation m a -> m a
-optimal resGeneration = do
+best :: (Monad m, Entity m a s) => Generation m a s -> m a 
+best resGeneration = do
     ((_, resArchive), _) <- W.runWriterT resGeneration
     if null resArchive
            then error $ "(evolve) empty archive!"
